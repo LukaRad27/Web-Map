@@ -1,0 +1,416 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="utf-8">
+    <title>Cape Town Water Dashboard</title>
+    <meta name="viewport" content="initial-scale=1,maximum-scale=1,user-scalable=no">
+    <link href="https://api.mapbox.com/mapbox-gl-js/v3.10.0/mapbox-gl.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <script src="https://api.mapbox.com/mapbox-gl-js/v3.10.0/mapbox-gl.js"></script>
+    <style>
+        html,
+        body {
+            margin: 0;
+            padding: 0;
+            height: 100%;
+        }
+
+        .mapboxgl-popup {
+            max-width: 400px;
+            font:
+                12px/20px 'Helvetica Neue',
+                Arial,
+                Helvetica,
+                sans-serif;
+        }
+
+        .navbar {
+            overflow: hidden;
+            background-color: #333;
+            flex-shrink: 0;
+        }
+
+        .navbar a {
+            float: left;
+            font-size: 16px;
+            color: white;
+            text-align: center;
+            padding: 14px 16px;
+            text-decoration: none;
+        }
+
+        .dropdown {
+            float: left;
+            overflow: hidden;
+        }
+
+        .dropdown .dropdown-anchor {
+            font-size: 16px;
+            border: none;
+            outline: none;
+            color: white;
+            padding: 14px 16px;
+            background-color: inherit;
+            font-family: inherit;
+            margin: 0;
+        }
+
+        .navbar a:hover,
+        .dropdown:hover .dropdown-anchor {
+            background-color: red;
+        }
+
+        .dropdown-content {
+            display: none;
+            position: absolute;
+            background-color: #f9f9f9;
+            min-width: 160px;
+            box-shadow: 0px 8px 16px 0px rgba(0, 0, 0, 0.2);
+            z-index: 1;
+        }
+
+        .dropdown-content a {
+            float: none;
+            color: black;
+            padding: 12px 16px;
+            text-decoration: none;
+            display: block;
+            text-align: left;
+        }
+
+        .dropdown-content a:hover {
+            background-color: #ddd;
+        }
+
+        .dropdown:hover .dropdown-content {
+            display: block;
+        }
+
+
+        #map {
+            width: 100%;
+            flex-grow: 1;
+            height: 100%;
+        }
+
+        #container {
+            /* display: flex; */
+            height: 100%;
+        }
+
+        .marker {
+            display: block;
+            border: none;
+            border-radius: 50%;
+            cursor: pointer;
+            padding: 0;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div id="controls-container">
+        <nav class="navbar">
+            <a id="reset-view" href="#">Reset View</a>
+            <div class="dropdown">
+                <button class="dropdown-anchor">View Dams
+                    <i class="fa fa-caret-down"></i>
+                </button>
+                <div class="dropdown-content"></div>
+            </div>
+            <div class="dropdown">
+                <button class="dropdown-anchor">Toggle
+                    <i class="fa fa-caret-down"></i>
+                </button>
+                <div class="dropdown-content">
+                    <a id="toggle-dams" href="#">Dams</a>
+                    <a id="toggle-reservoirs" href="#">Reservoirs</a>
+                    <a id="toggle-treatment-works" href="#">Treatment Works</a>
+                </div>
+            </div>
+    </div>
+
+    <div id="map"></div>
+    </div>
+
+    <script>
+        const INITIAL_CENTER = [18.758243, -34.122366];
+        const INITIAL_ZOOM = 9;
+        let damFeatures;
+        let reservoirFeatures;
+        let treatmentWorksFeatures;
+
+        //Organizing dams by general size
+        const largeDams = new Set(["Theewaterskloof"]);
+        const mediumDams = new Set(["Steenbras Upper", "Steenbras Lower", "Berg River", "Wemmershoek", "Voëlvlei"]);
+        const smallDams = new Set(["Hely-Hutchinson", "Woodhead", "Victoria", "Alexandra", "De Villiers", "Kleinplaats", "Lewis Gay", "Land-en-Zeezicht"])
+
+        mapboxgl.accessToken = 'pk.eyJ1IjoibHVrYXJhZDI3IiwiYSI6ImNtN3kybTJpNzA1OHEyaXBvcjgxMWhwcTUifQ.x0sGqnYyuk1eaqZ-dySQUw';
+        const map = new mapboxgl.Map({
+            container: 'map', // container ID
+            center: INITIAL_CENTER, // starting position [lng, lat]
+            zoom: INITIAL_ZOOM, // starting zoom
+            style: 'mapbox://styles/mapbox/standard-satellite',
+            projection: 'globe'
+        });
+
+
+        // Populate variable with geojson dam features
+        fetch('data/Bulk_Water_Dams-centerAdded.geojson')
+            .then(response => response.json())
+            .then(damData => {
+                // Access features from the GeoJSON
+                damFeatures = damData.features;
+            })
+            .catch(error => console.log('Error loading GeoJSON:', error));
+
+        // Populate variable with geojson active reservoir features
+        fetch('data/Water_reservoirs_list.geojson')
+            .then(response => response.json())
+            .then(reservoirData => {
+                // Access features from the GeoJSON
+                reservoirFeatures = reservoirData.features;
+            })
+            .catch(error => console.log('Error loading GeoJSON:', error));
+
+        // Populate variable with geojson active reservoir features
+        fetch('data/Water_treatment_works_list.geojson')
+            .then(response => response.json())
+            .then(treatmentWorksData => {
+                // Access features from the GeoJSON
+                treatmentWorksFeatures = treatmentWorksData.features;
+            })
+            .catch(error => console.log('Error loading GeoJSON:', error));
+
+        map.on('load', () => {
+            // Set the default atmospheric style
+            map.setFog({})
+
+            // Add source for CT dams
+            map.addSource('CT-major-dams', {
+                type: 'geojson',
+                data: 'data/Bulk_Water_Dams-centerAdded.geojson',
+                // promoteId: 'OBJECTID'
+            })
+
+            // Add source for active reservoirs
+            map.addSource('CT-reservoirs', {
+                type: 'geojson',
+                data: 'data/Water_reservoirs_list.geojson',
+            })
+
+            // Add source for treatment works
+            map.addSource('CT-treatment-works', {
+                type: 'geojson',
+                data: 'data/Water_treatment_works_list.geojson',
+            })
+
+            map.addLayer({
+                id: 'CT-major-dams-fill',
+                type: 'fill',
+                source: 'CT-major-dams',
+                paint: {
+                    'fill-color': 'steelblue',
+                    'fill-opacity': [
+                        'case',
+                        ['boolean', ['feature-state', 'hover'], false],
+                        1,
+                        0.5
+                    ]
+                },
+                layout: {
+                    visibility: 'none'
+                }
+            })
+
+            map.addLayer({
+                id: 'CT-major-dams-line',
+                type: 'line',
+                source: 'CT-major-dams',
+                paint: {
+                    'line-color': 'white',
+                    'line-width': 4
+                },
+                layout: {
+                    visibility: 'none'
+                }
+            })
+
+            map.addLayer({
+                id: 'CT-reservoirs-circle',
+                type: 'circle',
+                source: 'CT-reservoirs',
+                paint: {
+                    'circle-color': 'white',
+                    'circle-width': 4
+                },
+                layout: {
+                    visibility: 'none'
+                }
+            })
+
+            map.addLayer({
+                id: 'CT-treatment-works-circle',
+                type: 'circle',
+                source: 'CT-treatment-works',
+                paint: {
+                    'circle-color': 'orange',
+                    'circle-width': 4
+                },
+                layout: {
+                    visibility: 'none'
+                }
+            })
+
+            // Call function to populate dropdown with dam names in file
+            populateDropdownWithDamNames();
+
+            // Function to populate the dropdown dynamically based on the GeoJSON data
+            function populateDropdownWithDamNames() {
+                const dropdown = document.querySelector('.dropdown-content');
+                damFeatures.forEach((damFeature) => {
+                    // Define dam name
+                    const damName = damFeature.properties.NAME;
+
+                    // Define dam center
+                    let damCenter = damFeature.properties.CENTER;
+                    damCenter = JSON.parse(damCenter);
+
+                    // Choose zoom based on size Set:
+                    let zoomLevel;
+                    if (smallDams.has(damName)) {
+                        zoomLevel = 15;
+                    } else if (mediumDams.has(damName)) {
+                        zoomLevel = 13;
+                    } else if (largeDams.has(damName)) {
+                        zoomLevel = 11;
+                    }
+                    const link = document.createElement('a');
+                    link.href = '#';
+                    link.id = damName;
+                    link.textContent = damName;
+                    link.addEventListener('click', () => {
+                        map.flyTo({
+                            center: damCenter,
+                            zoom: zoomLevel,
+                            pitch: 60
+                        })
+                    });
+                    dropdown.appendChild(link);
+                });
+            }
+
+            map.on('click', (e) => {
+                const [selectedDam] = map.queryRenderedFeatures(e.point, {
+                    layers: ['CT-major-dams-fill']
+                })
+
+                if (selectedDam) {
+                    const { NAME, CPCT } = selectedDam.properties
+                    alert(`${NAME} has a capacity of ${CPCT} Ml`)
+                }
+            });
+
+            let hoveredPolygonId = null
+            map.on('mousemove', 'CT-major-dams-fill', (e) => {
+                if (e.features.length > 0) {
+                    if (hoveredPolygonId !== null) {
+                        map.setFeatureState(
+                            { source: 'CT-major-dams', id: hoveredPolygonId },
+                            { hover: false }
+                        );
+                    }
+                    hoveredPolygonId = e.features[0].id;
+                    map.setFeatureState(
+                        { source: 'CT-major-dams', id: hoveredPolygonId },
+                        { hover: true }
+                    );
+                }
+            });
+
+            map.on('mouseleave', 'CT-major-dams-fill', () => {
+                if (hoveredPolygonId !== null) {
+                    map.setFeatureState(
+                        { source: 'CT-major-dams', id: hoveredPolygonId },
+                        { hover: false }
+                    );
+                }
+                hoveredPolygonId = null;
+            });
+
+            // Add markers for reservoirs
+            // for (const marker of reservoirFeatures) {
+            //     // Create a DOM element for each marker.
+            //     const el = document.createElement('div');
+            //     // const width = marker.properties.iconSize[0];
+            //     // const height = marker.properties.iconSize[1];
+            //     el.className = 'marker';
+            //     el.style.backgroundImage = <a href="https://www.flaticon.com/free-icons/treatment" title="treatment icons">Treatment icons created by Uniconlabs - Flaticon</a>;
+            //     // el.style.width = `${width}px`;
+            //     // el.style.height = `${height}px`;
+            //     el.style.backgroundSize = '100%';
+
+            //     // el.addEventListener('click', () => {
+            //     //     window.alert(marker.properties.message);
+            //     // });
+
+            //     // Add markers to the map.
+            //     new mapboxgl.Marker(el)
+            //         .setLngLat(marker.geometry.coordinates)
+            //         .addTo(map);
+            // }
+        });
+
+        // // Reset view
+        document.querySelector('#reset-view').addEventListener('click', () => {
+            map.flyTo({
+                center: INITIAL_CENTER,
+                zoom: INITIAL_ZOOM,
+                pitch: 0
+            })
+        })
+
+        // Toggle Dams event listener
+        document.querySelector('#toggle-dams').addEventListener('click', () => {
+            const isVisible = map.getLayoutProperty('CT-major-dams-fill', 'visibility') === 'visible'
+            if (isVisible) {
+                map.setLayoutProperty('CT-major-dams-fill', 'visibility', 'none')
+                map.setLayoutProperty('CT-major-dams-line', 'visibility', 'none')
+            } else {
+                map.setLayoutProperty('CT-major-dams-fill', 'visibility', 'visible')
+                map.setLayoutProperty('CT-major-dams-line', 'visibility', 'visible')
+            }
+        })
+
+        // Toggle Reservoirs event listener
+        document.querySelector('#toggle-reservoirs').addEventListener('click', () => {
+            const isVisible = map.getLayoutProperty('CT-reservoirs-circle', 'visibility') === 'visible'
+            if (isVisible) {
+                map.setLayoutProperty('CT-reservoirs-circle', 'visibility', 'none')
+                // map.setLayoutProperty('CT-major-dams-line', 'visibility', 'none')
+            } else {
+                map.setLayoutProperty('CT-reservoirs-circle', 'visibility', 'visible')
+                // map.setLayoutProperty('CT-major-dams-line', 'visibility', 'visible')
+            }
+        })
+
+        // Toggle Treatment Works event listener
+        document.querySelector('#toggle-treatment-works').addEventListener('click', () => {
+            const isVisible = map.getLayoutProperty('CT-treatment-works-circle', 'visibility') === 'visible'
+            if (isVisible) {
+                map.setLayoutProperty('CT-treatment-works-circle', 'visibility', 'none')
+                // map.setLayoutProperty('CT-major-dams-line', 'visibility', 'none')
+            } else {
+                map.setLayoutProperty('CT-treatment-works-circle', 'visibility', 'visible')
+                // map.setLayoutProperty('CT-major-dams-line', 'visibility', 'visible')
+            }
+        })
+
+
+    </script>
+
+</body>
+
+</html>
